@@ -1,10 +1,11 @@
 import { getBearerToken, validateJWT } from "../auth";
 import { respondWithJSON } from "./json";
-import { getVideo, updateVideo, Video } from "../db/videos";
+import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
-
+import { randomBytes } from "crypto";
+const path = require('node:path');
 type Thumbnail = {
   data: ArrayBuffer;
   mediaType: string;
@@ -32,7 +33,11 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Thumbnail file is too large.");
   };
   const mediaType = file.type;
-  const video = await getVideo(cfg.db, videoId);
+  if ((mediaType !== "image/jpeg") && (mediaType !== "image/png")) {
+    throw new BadRequestError("Thumbnail file must be a jpeg or png file.");
+  };
+  const fileExtension = mediaType.split("/")[1];
+  const video = getVideo(cfg.db, videoId);
   if (!video) {
     throw new NotFoundError("No video found with that id.");
   }
@@ -40,10 +45,13 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new UserForbiddenError("User not owner of this video");
   };
   const arrayBuffer: ArrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer).toString("base64");
-  const dataURL = `data:${mediaType};base64,${buffer}`;
+  const buffer = Buffer.from(arrayBuffer);
+  const videoUniqueAddr = randomBytes(32).toString("base64url");
+  const filePath = path.join(cfg.assetsRoot, `${videoUniqueAddr}.${fileExtension}`);
+  Bun.write(filePath, buffer);
+  const dataURL = `http://localhost:${cfg.port}/assets/${videoUniqueAddr}.${fileExtension}`;
   video.thumbnailURL =  dataURL;
-  await updateVideo(cfg.db, video);
+  updateVideo(cfg.db, video);
 
   return respondWithJSON(200, video);
-}
+};
