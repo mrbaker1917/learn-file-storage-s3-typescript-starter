@@ -1,9 +1,9 @@
 import { respondWithJSON } from "./json";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import { type ApiConfig } from "../config";
-import type { BunRequest } from "bun";
+import { S3Client, type BunRequest } from "bun";
 import { getBearerToken, validateJWT } from "../auth";
-import { getVideo, updateVideo } from "../db/videos";
+import { getVideo, updateVideo, type Video } from "../db/videos";
 import path from "node:path";
 import { rm } from "fs/promises";
 import { json } from "node:stream/consumers";
@@ -41,11 +41,13 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const s3file = cfg.s3Client.file(`${aspectRatio}/${videoId}.mp4`, { bucket: cfg.s3Bucket});
   const outputFilePath = await processVideoForFastStart(filePath);
   await s3file.write(Bun.file(outputFilePath), { type: "video/mp4"});
-  video.videoURL =  `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${aspectRatio}/${videoId}.mp4`;
+  const key = `${aspectRatio}/${videoId}.mp4`;
+  video.videoURL = key;
   updateVideo(cfg.db, video);
   await rm(filePath, { force: true });
   await rm(outputFilePath, { force: true});
-  return respondWithJSON(200, video);
+  const newVid = dbVideoToSignedVideo(cfg, video)
+  return respondWithJSON(200, newVid);
 };
 
 export async function getVideoAspectRatio(filePath: string): Promise<string> {
@@ -79,4 +81,22 @@ async function processVideoForFastStart(inputFilePath: string) {
     throw new Error(stderrText);
   };
   return outputFilePath;
+};
+
+export function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number) {
+  
+  const presignedURL = cfg.s3Client.presign(key, {
+    expiresIn: expireTime,
+  });
+  return presignedURL;
+};
+
+export function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
+  const key = video.videoURL;
+  if (!key) {
+    return video;
+  }
+  const vidURL = generatePresignedURL(cfg, key, 5 * 60);
+  video.videoURL = vidURL;
+  return video;
 };
