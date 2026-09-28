@@ -42,12 +42,11 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const outputFilePath = await processVideoForFastStart(filePath);
   await s3file.write(Bun.file(outputFilePath), { type: "video/mp4"});
   const key = `${aspectRatio}/${videoId}.mp4`;
-  video.videoURL = key;
+  video.videoURL = `https://${cfg.s3CfDistribution}/${key}`;
   updateVideo(cfg.db, video);
   await rm(filePath, { force: true });
   await rm(outputFilePath, { force: true});
-  const newVid = dbVideoToSignedVideo(cfg, video)
-  return respondWithJSON(200, newVid);
+  return respondWithJSON(200, video);
 };
 
 export async function getVideoAspectRatio(filePath: string): Promise<string> {
@@ -81,22 +80,4 @@ async function processVideoForFastStart(inputFilePath: string) {
     throw new Error(stderrText);
   };
   return outputFilePath;
-};
-
-export function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number) {
-  
-  const presignedURL = cfg.s3Client.presign(key, {
-    expiresIn: expireTime,
-  });
-  return presignedURL;
-};
-
-export function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
-  const key = video.videoURL;
-  if (!key) {
-    return video;
-  }
-  const vidURL = generatePresignedURL(cfg, key, 5 * 60);
-  video.videoURL = vidURL;
-  return video;
 };
